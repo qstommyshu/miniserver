@@ -5,7 +5,7 @@ use std::{
 
 pub struct ThreadPool {
     workers: Vec<Worker>,
-    sender: mpsc::Sender<Job>,
+    sender: Option<mpsc::Sender<Job>>,
 }
 
 // struct Job;
@@ -24,31 +24,12 @@ impl ThreadPool {
             // create some threads and store them in vector
             workers.push(Worker::new(id, Arc::clone(&receiver)));
         }
-        ThreadPool { workers, sender }
+        ThreadPool {
+            workers,
+            sender: Some(sender),
+        }
     }
 }
-
-struct Worker {
-    id: usize,
-    thread: thread::JoinHandle<()>, //what is ()? a joinHandle that doesn't return anything?
-}
-
-impl Worker {
-    fn new(id: usize, receiver: Arc<Mutex<mpsc::Receiver<Job>>>) -> Worker {
-        let thread = thread::spawn(move || loop {
-            // receiver; //TODO: understand this??
-            // receiver.get a lock. receive. unwrap info
-            let job = receiver.lock().unwrap().recv().unwrap();
-
-            println!("Worker {id} got a job; executing.");
-
-            job();
-        });
-        Worker { id, thread }
-    }
-}
-
-type Job = Box<dyn FnOnce() + Send + 'static>; //This replace the struct Job
 
 impl ThreadPool {
     pub fn execute<F>(&self, f: F)
@@ -56,6 +37,56 @@ impl ThreadPool {
         F: FnOnce() + Send + 'static,
     {
         let job = Box::new(f);
-        self.sender.send(job).unwrap();
+        // self.sender.send(job).unwrap();
+        self.sender.as_ref().unwrap().send(job).unwrap();
     }
 }
+
+impl Drop for ThreadPool {
+    fn drop(&mut self) {
+        for worker in &mut self.workers {
+            //for iterator get references, needs to chagne to mutable references
+            println!("Shutting down worker {}", worker.id);
+
+            // worker.thread.join().unwrap();
+            if let Some(thread) = worker.thread.take() {
+                thread.join().unwrap();
+            }
+        }
+    }
+}
+struct Worker {
+    id: usize,
+    thread: Option<thread::JoinHandle<()>>, //what is ()? a joinHandle that doesn't return anything?
+}
+
+impl Worker {
+    fn new(id: usize, receiver: Arc<Mutex<mpsc::Receiver<Job>>>) -> Worker {
+        let thread = thread::spawn(move || loop {
+            // receiver; //TODO: understand this??
+            // receiver.get a lock. receive. unwrap info
+            let message = receiver.lock().unwrap().recv();
+
+            match message {
+                Ok(job) => {
+                    println!("Worker {id} got a job; executing.");
+
+                    job();
+                }
+                Err(_) => {
+                    println!("Worker {id} got disconnected; shutting down.");
+                    break;
+                }
+            }
+            // println!("Worker {id} got a job; executing.");
+
+            // job();
+        });
+        Worker {
+            id,
+            thread: Some(thread),
+        }
+    }
+}
+
+type Job = Box<dyn FnOnce() + Send + 'static>; //This replace the struct Job
