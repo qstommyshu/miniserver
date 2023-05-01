@@ -9,6 +9,7 @@ pub struct ThreadPool {
 }
 
 // struct Job;
+type Job = Box<dyn FnOnce() + Send + 'static>; //Type alias
 
 impl ThreadPool {
     pub fn new(size: usize) -> ThreadPool {
@@ -29,9 +30,7 @@ impl ThreadPool {
             sender: Some(sender),
         }
     }
-}
 
-impl ThreadPool {
     pub fn execute<F>(&self, f: F)
     where
         F: FnOnce() + Send + 'static,
@@ -40,15 +39,19 @@ impl ThreadPool {
         // self.sender.send(job).unwrap();
         self.sender.as_ref().unwrap().send(job).unwrap();
     }
+
 }
 
 impl Drop for ThreadPool {
     fn drop(&mut self) {
+        drop(self.sender.take());
+
         for worker in &mut self.workers {
             //for iterator get references, needs to chagne to mutable references
             println!("Shutting down worker {}", worker.id);
 
             // worker.thread.join().unwrap();
+            //Take the ownership of worker that still have threads
             if let Some(thread) = worker.thread.take() {
                 thread.join().unwrap();
             }
@@ -89,6 +92,3 @@ impl Worker {
     }
 }
 
-type Job = Box<dyn FnOnce() + Send + 'static>; //This replace the struct Job
-
-//need to check
