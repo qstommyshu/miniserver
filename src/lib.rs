@@ -90,3 +90,5 @@ impl Worker {
 }
 
 type Job = Box<dyn FnOnce() + Send + 'static>; //This replace the struct Job
+
+//need to check
